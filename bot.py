@@ -212,7 +212,7 @@ def run_tracker():
         final_msg += "🏒 <b>NHL HOT REG WINS (7+ Games)</b>\n\n"
         for item in nhl_results:
             final_msg += f"• <b>{item['team']}</b> — <code>{item['streak']} խաղ</code> անընդմեջ (REG)\n"
-            final_msg += f"  📊 <b>Ֆիբոնաչի Քայլ {item['step']}:</b> <code>{item['units']} unit</code> (<b>{item['total']} ֏</b>)\n"
+            final_msg += f"  📊 <b>Քայլ {item['step']}:</b> <code>{item['units']} unit</code> (<b>{item['total']} ֏</b>)\n"
             final_msg += f"  ▫️ Վերջինը՝ <i>{item['score']}</i>\n"
             final_msg += f"  ▫️ Հաջորդը՝ <b>{item['opp']}</b>\n"
             final_msg += f"  📅 Ժամը՝ <code>{item['time']}</code>\n"
