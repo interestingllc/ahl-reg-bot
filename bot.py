@@ -1,13 +1,10 @@
 import os
 import json
 import requests
-from datetime import datetime, timezone
 
 TELEGRAM_TOKEN = "9222342874:AAE5HcLB6w-niLGjblNfSyN5D3uxXrA96iw"
 TELEGRAM_CHAT_ID = "207711581"
 API_KEY_ODDS = "9b60552be1354eeca4cf50ceb83c52ef"
-API_KEY_AHL = "50c2cd9b5eac73ca"
-CLIENT_CODE_AHL = "ahl"
 MIN_STREAK = 7
 BASE_UNIT = 100  # 100 AMD
 STATE_FILE = "last_streaks.json"
@@ -21,20 +18,6 @@ NHL_TEAM_MAP = {
     "PHI": "Philadelphia Flyers", "PIT": "Pittsburgh Penguins", "SJS": "San Jose Sharks", "SEA": "Seattle Kraken",
     "STL": "St Louis Blues", "TBL": "Tampa Bay Lightning", "TOR": "Toronto Maple Leafs", "UTA": "Utah Hockey Club",
     "VAN": "Vancouver Canucks", "VGK": "Vegas Golden Knights", "WSH": "Washington Capitals", "WPG": "Winnipeg Jets"
-}
-
-AHL_TEAM_MAP = {
-    "Abbotsford": "Abbotsford Canucks", "Bakersfield": "Bakersfield Condors", "Belleville": "Belleville Senators",
-    "Bridgeport": "Bridgeport Islanders", "Calgary": "Calgary Wranglers", "Charlotte": "Charlotte Checkers",
-    "Chicago": "Chicago Wolves", "Cleveland": "Cleveland Monsters", "Coachella Valley": "Coachella Valley Firebirds",
-    "Colorado": "Colorado Eagles", "Grand Rapids": "Grand Rapids Griffins", "Hartford": "Hartford Wolf Pack",
-    "Hershey": "Hershey Bears", "Henderson": "Henderson Silver Knights", "Iowa": "Iowa Wild",
-    "Laval": "Laval Rocket", "Lehigh Valley": "Lehigh Valley Phantoms", "Manitoba": "Manitoba Moose",
-    "Milwaukee": "Milwaukee Admirals", "Ontario": "Ontario Reign", "Providence": "Providence Bruins",
-    "Rochester": "Rochester Americans", "Rockford": "Rockford IceHogs", "San Diego": "San Diego Gulls",
-    "San Jose": "San Jose Barracuda", "Springfield": "Springfield Thunderbirds", "Syracuse": "Syracuse Crunch",
-    "Texas": "Texas Stars", "Toronto": "Toronto Marlies", "Tucson": "Tucson Roadrunners",
-    "Utica": "Utica Comets", "Wilkes-Barre": "Wilkes-Barre/Scranton Penguins"
 }
 
 FIBONACCI = [1, 1, 2, 3, 5, 8, 13, 21, 34, 55, 89, 144]
@@ -55,7 +38,7 @@ def send_telegram(msg):
         print(f"Telegram error: {e}")
 
 def run_tracker():
-    print("Starting NHL + AHL Tracker...")
+    print("Starting NHL Tracker...")
     prev_teams = []
     if os.path.exists(STATE_FILE):
         try:
@@ -64,22 +47,11 @@ def run_tracker():
         except Exception:
             pass
 
-    # Odds API
-    all_odds = []
-    for lg in ["icehockey_nhl", "icehockey_ahl"]:
-        try:
-            r = requests.get(f"https://api.the-odds-api.com/v4/sports/{lg}/odds/?apiKey={API_KEY_ODDS}&regions=us,eu&markets=h2h,h2h_3way", timeout=10)
-            if r.status_code == 200:
-                all_odds.extend(r.json())
-        except Exception:
-            pass
-
     current_hot = []
-    nhl_results, ahl_results = [], []
+    nhl_results = []
     nhl_streaks, nhl_last_outcomes = {}, {}
-    ahl_streaks, ahl_last_outcomes = {}, {}
 
-    # 1. NHL
+    # 1. NHL Analysis
     for abbr, full_name in NHL_TEAM_MAP.items():
         try:
             res = requests.get(f"https://api-web.nhle.com/v1/club-schedule-season/{abbr}/now", timeout=10).json()
@@ -99,8 +71,8 @@ def run_tracker():
                         break
                     cnt += 1
                 nhl_streaks[abbr] = cnt
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"NHL error for {abbr}: {e}")
 
     for abbr, streak in nhl_streaks.items():
         if streak >= MIN_STREAK:
@@ -110,59 +82,20 @@ def run_tracker():
 
             nhl_results.append({
                 "team": f"NHL: {abbr}", "streak": streak, "step": step, "units": units,
-                "total": total_amd, "score": last_score, "opp": "vs TBD", "time": "TBD", "odds": ""
+                "total": total_amd, "score": last_score
             })
-
-    # 2. AHL (Անվտանգ ստուգումներով)
-    try:
-        ahl_url = f"https://lscluster.hockeytech.com/feed/index.php?feed=statviewfeed&view=schedule&team_id=all&season_id=all&key={API_KEY_AHL}&client_code={CLIENT_CODE_AHL}"
-        ahl_resp_raw = requests.get(ahl_url, timeout=10)
-        
-        if ahl_resp_raw.status_code == 200 and ahl_resp_raw.text.strip():
-            try:
-                ahl_resp = ahl_resp_raw.json()
-                ahl_games = ahl_resp[0]["sections"][0]["data"]
-                completed_ahl = [g for g in ahl_games if g["prop"]["game_status"]["value"] in ["Final", "Final OT", "Final SO"]]
-                
-                ahl_cities = list(set([g["prop"]["home_team_city"]["value"] for g in completed_ahl]))
-                for city in ahl_cities:
-                    t_games = [g for g in completed_ahl if g["prop"]["home_team_city"]["value"] == city or g["prop"]["visiting_team_city"]["value"] == city]
-                    t_games.sort(key=lambda x: x["prop"]["date_with_day"]["value"], reverse=True)
-                    if t_games:
-                        st = t_games[0]["prop"]["game_status"]["value"]
-                        ahl_last_outcomes[city] = {
-                            "status": st,
-                            "score": f"{t_games[0]['prop']['visiting_team_city']['value']} {t_games[0]['prop']['visiting_team_goals']['value']} - {t_games[0]['prop']['home_team_goals']['value']} {t_games[0]['prop']['home_team_city']['value']}"
-                        }
-                        cnt = 0
-                        for g in t_games:
-                            if g["prop"]["game_status"]["value"] in ["Final OT", "Final SO"]:
-                                break
-                            cnt += 1
-                        ahl_streaks[city] = cnt
-
-                for city, streak in ahl_streaks.items():
-                    if streak >= MIN_STREAK:
-                        current_hot.append(f"AHL:{city}")
-                        step, units, total_amd = get_fibonacci_bet(streak, BASE_UNIT)
-                        ahl_results.append({
-                            "team": f"AHL: {city}", "streak": streak, "step": step, "units": units,
-                            "total": total_amd, "score": ahl_last_outcomes[city]["score"], "opp": "vs TBD", "time": "TBD", "odds": ""
-                        })
-            except Exception as json_err:
-                print(f"AHL JSON Parse Error: {json_err}")
-    except Exception as e:
-        print(f"AHL Request Error: {e}")
 
     # Build & Send Telegram message
     msg = ""
-    if nhl_results or ahl_results:
-        msg += "🏒 <b>BOT REG STREAKS (7+ Games)</b>\n\n"
-        for item in nhl_results + ahl_results:
+    if nhl_results:
+        msg += "🏒 <b>NHL HOT REG STREAKS (7+ Games)</b>\n\n"
+        for item in nhl_results:
             msg += f"• <b>{item['team']}</b> — <code>{item['streak']} խաղ</code> (REG)\n"
             msg += f"  📊 <b>Ֆիբոնաչի Քայլ {item['step']}:</b> <code>{item['units']} unit</code> (<b>{item['total']} ֏</b>)\n"
             msg += f"  ▫️ Վերջինը՝ <i>{item['score']}</i>\n\n"
         send_telegram(msg)
+    else:
+        print("7+ REG շարքով NHL թիմեր չեն գտնվել:")
 
     with open(STATE_FILE, "w", encoding="utf-8") as f:
         json.dump(current_hot, f)
