@@ -98,7 +98,6 @@ def run_tracker():
                     if pt in ["OT", "SO"]:
                         break
                     cnt += 1
-                nhlStreaks[abbr] = cnt
                 nhl_streaks[abbr] = cnt
         except Exception:
             pass
@@ -108,48 +107,52 @@ def run_tracker():
             current_hot.append(f"NHL:{abbr}")
             step, units, total_amd = get_fibonacci_bet(streak, BASE_UNIT)
             last_score = nhl_last_outcomes[abbr]["score"]
-            full_name = NHL_TEAM_MAP[abbr]
 
-            # Next opponent & odds logic...
             nhl_results.append({
                 "team": f"NHL: {abbr}", "streak": streak, "step": step, "units": units,
                 "total": total_amd, "score": last_score, "opp": "vs TBD", "time": "TBD", "odds": ""
             })
 
-    # 2. AHL
+    # 2. AHL (Անվտանգ ստուգումներով)
     try:
         ahl_url = f"https://lscluster.hockeytech.com/feed/index.php?feed=statviewfeed&view=schedule&team_id=all&season_id=all&key={API_KEY_AHL}&client_code={CLIENT_CODE_AHL}"
-        ahl_resp = requests.get(ahl_url, timeout=10).json()
-        ahl_games = ahl_resp[0]["sections"][0]["data"]
-        completed_ahl = [g for g in ahl_games if g["prop"]["game_status"]["value"] in ["Final", "Final OT", "Final SO"]]
+        ahl_resp_raw = requests.get(ahl_url, timeout=10)
         
-        ahl_cities = list(set([g["prop"]["home_team_city"]["value"] for g in completed_ahl]))
-        for city in ahl_cities:
-            t_games = [g for g in completed_ahl if g["prop"]["home_team_city"]["value"] == city or g["prop"]["visiting_team_city"]["value"] == city]
-            t_games.sort(key=lambda x: x["prop"]["date_with_day"]["value"], reverse=True)
-            if t_games:
-                st = t_games[0]["prop"]["game_status"]["value"]
-                ahl_last_outcomes[city] = {
-                    "status": st,
-                    "score": f"{t_games[0]['prop']['visiting_team_city']['value']} {t_games[0]['prop']['visiting_team_goals']['value']} - {t_games[0]['prop']['home_team_goals']['value']} {t_games[0]['prop']['home_team_city']['value']}"
-                }
-                cnt = 0
-                for g in t_games:
-                    if g["prop"]["game_status"]["value"] in ["Final OT", "Final SO"]:
-                        break
-                    cnt += 1
-                ahl_streaks[city] = cnt
+        if ahl_resp_raw.status_code == 200 and ahl_resp_raw.text.strip():
+            try:
+                ahl_resp = ahl_resp_raw.json()
+                ahl_games = ahl_resp[0]["sections"][0]["data"]
+                completed_ahl = [g for g in ahl_games if g["prop"]["game_status"]["value"] in ["Final", "Final OT", "Final SO"]]
+                
+                ahl_cities = list(set([g["prop"]["home_team_city"]["value"] for g in completed_ahl]))
+                for city in ahl_cities:
+                    t_games = [g for g in completed_ahl if g["prop"]["home_team_city"]["value"] == city or g["prop"]["visiting_team_city"]["value"] == city]
+                    t_games.sort(key=lambda x: x["prop"]["date_with_day"]["value"], reverse=True)
+                    if t_games:
+                        st = t_games[0]["prop"]["game_status"]["value"]
+                        ahl_last_outcomes[city] = {
+                            "status": st,
+                            "score": f"{t_games[0]['prop']['visiting_team_city']['value']} {t_games[0]['prop']['visiting_team_goals']['value']} - {t_games[0]['prop']['home_team_goals']['value']} {t_games[0]['prop']['home_team_city']['value']}"
+                        }
+                        cnt = 0
+                        for g in t_games:
+                            if g["prop"]["game_status"]["value"] in ["Final OT", "Final SO"]:
+                                break
+                            cnt += 1
+                        ahl_streaks[city] = cnt
 
-        for city, streak in ahl_streaks.items():
-            if streak >= MIN_STREAK:
-                current_hot.append(f"AHL:{city}")
-                step, units, total_amd = get_fibonacci_bet(streak, BASE_UNIT)
-                ahl_results.append({
-                    "team": f"AHL: {city}", "streak": streak, "step": step, "units": units,
-                    "total": total_amd, "score": ahl_last_outcomes[city]["score"], "opp": "vs TBD", "time": "TBD", "odds": ""
-                })
+                for city, streak in ahl_streaks.items():
+                    if streak >= MIN_STREAK:
+                        current_hot.append(f"AHL:{city}")
+                        step, units, total_amd = get_fibonacci_bet(streak, BASE_UNIT)
+                        ahl_results.append({
+                            "team": f"AHL: {city}", "streak": streak, "step": step, "units": units,
+                            "total": total_amd, "score": ahl_last_outcomes[city]["score"], "opp": "vs TBD", "time": "TBD", "odds": ""
+                        })
+            except Exception as json_err:
+                print(f"AHL JSON Parse Error: {json_err}")
     except Exception as e:
-        print(f"AHL Error: {e}")
+        print(f"AHL Request Error: {e}")
 
     # Build & Send Telegram message
     msg = ""
