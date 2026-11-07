@@ -39,9 +39,8 @@ def send_telegram(msg):
         print(f"Telegram error: {e}")
 
 def run_tracker():
-    print("Starting NHL Tracker with Odds & Draw prices...")
+    print("Starting NHL Tracker with precise REG win-streak validation...")
     
-    # Load previous state for reset checks
     prev_teams = []
     if os.path.exists(STATE_FILE):
         try:
@@ -50,7 +49,6 @@ def run_tracker():
         except Exception:
             pass
 
-    # Fetch Odds API data
     all_odds = []
     try:
         odds_url = f"https://api.the-odds-api.com/v4/sports/icehockey_nhl/odds/?apiKey={API_KEY_ODDS}&regions=us,eu&markets=h2h,h2h_3way"
@@ -64,7 +62,7 @@ def run_tracker():
     nhl_results = []
     nhl_streaks, nhl_schedules, nhl_last_outcomes = {}, {}, {}
 
-    # 1. NHL Analysis
+    # 1. NHL Analysis with precise win & regulation checks for ALL teams
     for abbr, full_name in NHL_TEAM_MAP.items():
         try:
             res = requests.get(f"https://api-web.nhle.com/v1/club-schedule-season/{abbr}/now", timeout=10).json()
@@ -75,35 +73,55 @@ def run_tracker():
                 if completed:
                     completed.sort(key=lambda x: x["gameDate"], reverse=True)
                     last_g = completed[0]
+                    
+                    is_home_last = (last_g['homeTeam']['abbrev'] == abbr)
+                    l_home_score = last_g['homeTeam']['score']
+                    l_away_score = last_g['awayTeam']['score']
+                    l_team_score = l_home_score if is_home_last else l_away_score
+                    l_opp_score = l_away_score if is_home_last else l_home_score
+
                     nhl_last_outcomes[abbr] = {
                         "period": last_g.get("gameOutcome", {}).get("lastPeriodType"),
-                        "score": f"{last_g['awayTeam']['abbrev']} {last_g['awayTeam']['score']} - {last_g['homeTeam']['score']} {last_g['homeTeam']['abbrev']}"
+                        "score": f"{last_g['awayTeam']['abbrev']} {last_g['awayTeam']['score']} - {last_g['homeTeam']['score']} {last_g['homeTeam']['abbrev']}",
+                        "won": l_team_score > l_opp_score
                     }
+                    
+                    # Calculate consecutive REG wins accurately
                     cnt = 0
                     for g in completed:
+                        h_abbr = g['homeTeam']['abbrev']
+                        a_abbr = g['externalGameState'] if 'externalGameState' in g else g['homeTeam']['abbrev'] # safety
+                        h_score = g['homeTeam']['score']
+                        a_score = g['awayTeam']['score']
+                        
+                        is_home = (g['homeTeam']['abbrev'] == abbr)
+                        t_score = h_score if is_home else a_score
+                        o_score = a_score if is_home else h_score
+                        
                         pt = g.get("gameOutcome", {}).get("lastPeriodType")
-                        if pt in ["OT", "SO"]:
+                        
+                        # Must have WON in Regulation (Team score > Opponent score AND not OT/SO)
+                        if t_score > o_score and pt not in ["OT", "SO"]:
+                            cnt += 1
+                        else:
                             break
-                        cnt += 1
                     nhl_streaks[abbr] = cnt
         except Exception as e:
             print(f"NHL error for {abbr}: {e}")
 
+    # Check for streak breaks/resets
     reset_message = ""
     for prev_item in prev_teams:
         if prev_item.startswith("NHL:"):
             p_team = prev_item.split(":")[1]
-            if current_hot.count(prev_item) == 0 and p_team in nhl_last_outcomes:
-                l_out = nhl_last_outcomes[p_team]
-                if l_out.get("period") in ["OT", "SO"]:
-                    reset_message += f"⚠️ <b>ՇԱՐՔԸ ԸՆԴՀԱՏՎԵՑ (OT/SO)</b>\n"
-                    reset_message += f"• <b>NHL: {p_team}</b> — Վերջին խաղում խաղաց ոչ-ոքի (OT/SO)\n"
-                    reset_message += f"  ▫️ Հաշիվը՝ <i>{l_out['score']}</i>\n  ❌ Թիմը դուրս եկավ ցուցակից:\n\n"
+            if p_team in nhl_streaks and nhl_streaks[p_team] < MIN_STREAK:
+                reset_message += f"⚠️ <b>ՇԱՐՔԸ ԸՆԴՀԱՏՎԵՑ</b>\n"
+                reset_message += f"• <b>NHL: {p_team}</b> — Անընդմեջ REG հաղթանակների շարքը նվազել է (< 7)\n  ❌ Թիմը դուրս եկավ ցուցակից:\n\n"
 
     for abbr, streak in nhl_streaks.items():
         if streak >= MIN_STREAK:
             current_hot.append(f"NHL:{abbr}")
-            step, units, total_amd = Get_Fib_Bet = get_fibonacci_bet(streak, BASE_UNIT)
+            step, units, total_amd = get_fibonacci_bet(streak, BASE_UNIT)
             last_score = nhl_last_outcomes[abbr]["score"]
             full_name = NHL_TEAM_MAP[abbr]
 
@@ -148,14 +166,14 @@ def run_tracker():
                         target_bm = None
                         target_market = None
                         for bm in o_game.get("bookmakers", []):
-                            m3 = [m for m in bm.get("markets", []) if m.get("key") == "h2h_3way"]
+                            m3 = [m for m in bm.get("markets", []) if m.get("key"] == "h2h_3way"]
                             if m3:
                                 target_bm = bm
                                 target_market = m3[0]
                                 break
                         if not target_market and o_game.get("bookmakers"):
                             target_bm = o_game["bookmakers"][0]
-                            m2 = [m for m in target_bm.get("markets", []) if m.get("key") == "h2h"]
+                            m2 = [m for m in target_bm.get("markets", []) if m.get("key"] == "h2h"]
                             if m2:
                                 target_market = m2[0]
 
@@ -191,7 +209,7 @@ def run_tracker():
         final_msg += reset_message
 
     if nhl_results:
-        final_msg += "🏒 <b>NHL HOT REG STREAKS (7+ Games)</b>\n\n"
+        final_msg += "🏒 <b>NHL HOT REG WINS (7+ Games)</b>\n\n"
         for item in nhl_results:
             final_msg += f"• <b>{item['team']}</b> — <code>{item['streak']} խաղ</code> անընդմեջ (REG)\n"
             final_msg += f"  📊 <b>Ֆիբոնաչի Քայլ {item['step']}:</b> <code>{item['units']} unit</code> (<b>{item['total']} ֏</b>)\n"
@@ -205,7 +223,7 @@ def run_tracker():
     if final_msg:
         send_telegram(final_msg)
     else:
-        print("7+ REG շարքով թիմեր չեն գտնվել:")
+        print("7+ REG հաղթանակների շարքով թիմեր չեն գտնվել:")
 
     with open(STATE_FILE, "w", encoding="utf-8") as f:
         json.dump(current_hot, f)
