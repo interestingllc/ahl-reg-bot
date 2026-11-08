@@ -89,8 +89,6 @@ def run_tracker():
                     # Calculate consecutive REG wins accurately
                     cnt = 0
                     for g in completed:
-                        h_abbr = g['homeTeam']['abbrev']
-                        a_abbr = g['externalGameState'] if 'externalGameState' in g else g['homeTeam']['abbrev'] # safety
                         h_score = g['homeTeam']['score']
                         a_score = g['awayTeam']['score']
                         
@@ -100,7 +98,6 @@ def run_tracker():
                         
                         pt = g.get("gameOutcome", {}).get("lastPeriodType")
                         
-                        # Must have WON in Regulation (Team score > Opponent score AND not OT/SO)
                         if t_score > o_score and pt not in ["OT", "SO"]:
                             cnt += 1
                         else:
@@ -132,6 +129,7 @@ def run_tracker():
             next_opp = "Անհայտ"
             next_opp_abbr = ""
             next_time = "Անհայտ"
+            raw_datetime = None
             opp_streak_str = ""
             game_odds_str = ""
 
@@ -154,6 +152,7 @@ def run_tracker():
                 if start_time_utc:
                     try:
                         dt = datetime.fromisoformat(start_time_utc.replace("Z", "+00:00"))
+                        raw_datetime = dt
                         next_time = dt.strftime("%d.%m.%Y %H:%M")
                     except Exception:
                         next_time = start_time_utc
@@ -200,8 +199,11 @@ def run_tracker():
             nhl_results.append({
                 "team": f"NHL: {abbr}", "streak": streak, "step": step, "units": units,
                 "total": total_amd, "score": last_score, "opp": f"{next_opp}{opp_streak_str}",
-                "time": next_time, "odds": game_odds_str
+                "time": next_time, "raw_time": raw_datetime, "odds": game_odds_str
             })
+
+    # Sort results chronologically by next match time
+    nhl_results.sort(key=lambda x: x["raw_time"] if x["raw_time"] is not None else datetime.max.replace(tzinfo=timezone.utc))
 
     # Build & Send Telegram message
     final_msg = ""
@@ -212,7 +214,7 @@ def run_tracker():
         final_msg += "🏒 <b>NHL HOT REG WINS (7+ Games)</b>\n\n"
         for item in nhl_results:
             final_msg += f"• <b>{item['team']}</b> — <code>{item['streak']} խաղ</code> անընդմեջ (REG)\n"
-            final_msg += f"  📊 <b>Քայլ {item['step']}:</b> <code>{item['units']} unit</code> (<b>{item['total']} ֏</b>)\n"
+            final_msg += f"  📊 <b>Ֆիբոնաչի Քայլ {item['step']}:</b> <code>{item['units']} unit</code> (<b>{item['total']} ֏</b>)\n"
             final_msg += f"  ▫️ Վերջինը՝ <i>{item['score']}</i>\n"
             final_msg += f"  ▫️ Հաջորդը՝ <b>{item['opp']}</b>\n"
             final_msg += f"  📅 Ժամը՝ <code>{item['time']}</code>\n"
@@ -229,5 +231,4 @@ def run_tracker():
         json.dump(current_hot, f)
 
 if __name__ == "__main__":
-    send_telegram("🧪 Փորձնական հաղորդագրություն Render-ից՝ բոտի աշխատանքը ստուգելու համար։")
     run_tracker()
