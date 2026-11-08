@@ -166,14 +166,14 @@ def run_tracker():
                         target_bm = None
                         target_market = None
                         for bm in o_game.get("bookmakers", []):
-                            m3 = [m for m in bm.get("markets", []) if m.get("key"] == "h2h_3way"]
+                            m3 = [m for m in bm.get("markets", []) if m.get("key") == "h2h_3way"]
                             if m3:
                                 target_bm = bm
                                 target_market = m3[0]
                                 break
                         if not target_market and o_game.get("bookmakers"):
                             target_bm = o_game["bookmakers"][0]
-                            m2 = [m for m in target_bm.get("markets", []) if m.get("key"] == "h2h"]
+                            m2 = [m for m in target_bm.get("markets", []) if m.get("key") == "h2h"]
                             if m2:
                                 target_market = m2[0]
 
