@@ -1,7 +1,7 @@
 import os
 import json
 import requests
-from datetime import datetime
+from datetime import datetime, timezone
 
 TELEGRAM_TOKEN = "9222342874:AAE5HcLB6w-niLGjblNfSyN5D3uxXrA96iw"
 TELEGRAM_CHAT_ID = "207711581"
@@ -39,7 +39,7 @@ def send_telegram(msg):
         print(f"Telegram error: {e}")
 
 def run_tracker():
-    print("Starting NHL Tracker with precise REG win-streak validation...")
+    print("Starting NHL Tracker with chronological sorting...")
     
     prev_teams = []
     if os.path.exists(STATE_FILE):
@@ -62,7 +62,7 @@ def run_tracker():
     nhl_results = []
     nhl_streaks, nhl_schedules, nhl_last_outcomes = {}, {}, {}
 
-    # 1. NHL Analysis with precise win & regulation checks for ALL teams
+    # 1. NHL Analysis
     for abbr, full_name in NHL_TEAM_MAP.items():
         try:
             res = requests.get(f"https://api-web.nhle.com/v1/club-schedule-season/{abbr}/now", timeout=10).json()
@@ -73,35 +73,18 @@ def run_tracker():
                 if completed:
                     completed.sort(key=lambda x: x["gameDate"], reverse=True)
                     last_g = completed[0]
-                    
-                    is_home_last = (last_g['homeTeam']['abbrev'] == abbr)
-                    l_home_score = last_g['homeTeam']['score']
-                    l_away_score = last_g['awayTeam']['score']
-                    l_team_score = l_home_score if is_home_last else l_away_score
-                    l_opp_score = l_away_score if is_home_last else l_home_score
-
                     nhl_last_outcomes[abbr] = {
                         "period": last_g.get("gameOutcome", {}).get("lastPeriodType"),
-                        "score": f"{last_g['awayTeam']['abbrev']} {last_g['awayTeam']['score']} - {last_g['homeTeam']['score']} {last_g['homeTeam']['abbrev']}",
-                        "won": l_team_score > l_opp_score
+                        "score": f"{last_g['awayTeam']['abbrev']} {last_g['awayTeam']['score']} - {last_g['homeTeam']['score']} {last_g['homeTeam']['abbrev']}"
                     }
                     
-                    # Calculate consecutive REG wins accurately
+                    # Calculate consecutive REG games (not reaching OT/SO)
                     cnt = 0
                     for g in completed:
-                        h_score = g['homeTeam']['score']
-                        a_score = g['awayTeam']['score']
-                        
-                        is_home = (g['homeTeam']['abbrev'] == abbr)
-                        t_score = h_score if is_home else a_score
-                        o_score = a_score if is_home else h_score
-                        
                         pt = g.get("gameOutcome", {}).get("lastPeriodType")
-                        
-                        if t_score > o_score and pt not in ["OT", "SO"]:
-                            cnt += 1
-                        else:
+                        if pt in ["OT", "SO"]:
                             break
+                        cnt += 1
                     nhl_streaks[abbr] = cnt
         except Exception as e:
             print(f"NHL error for {abbr}: {e}")
@@ -113,7 +96,7 @@ def run_tracker():
             p_team = prev_item.split(":")[1]
             if p_team in nhl_streaks and nhl_streaks[p_team] < MIN_STREAK:
                 reset_message += f"⚠️ <b>ՇԱՐՔԸ ԸՆԴՀԱՏՎԵՑ</b>\n"
-                reset_message += f"• <b>NHL: {p_team}</b> — Անընդմեջ REG հաղթանակների շարքը նվազել է (< 7)\n  ❌ Թիմը դուրս եկավ ցուցակից:\n\n"
+                reset_message += f"• <b>NHL: {p_team}</b> — Անընդմեջ REG շարքը նվազել է (< 7)\n  ❌ Թիմը դուրս եկավ ցուցակից:\n\n"
 
     for abbr, streak in nhl_streaks.items():
         if streak >= MIN_STREAK:
@@ -202,7 +185,7 @@ def run_tracker():
                 "time": next_time, "raw_time": raw_datetime, "odds": game_odds_str
             })
 
-    # Sort results chronologically by next match time
+    # Sort results chronologically by next match time (closest game first)
     nhl_results.sort(key=lambda x: x["raw_time"] if x["raw_time"] is not None else datetime.max.replace(tzinfo=timezone.utc))
 
     # Build & Send Telegram message
@@ -211,7 +194,7 @@ def run_tracker():
         final_msg += reset_message
 
     if nhl_results:
-        final_msg += "🏒 <b>NHL HOT REG WINS (7+ Games)</b>\n\n"
+        final_msg += "🏒 <b>NHL HOT REG STREAKS (7+ Games)</b>\n\n"
         for item in nhl_results:
             final_msg += f"• <b>{item['team']}</b> — <code>{item['streak']} խաղ</code> անընդմեջ (REG)\n"
             final_msg += f"  📊 <b>Ֆիբոնաչի Քայլ {item['step']}:</b> <code>{item['units']} unit</code> (<b>{item['total']} ֏</b>)\n"
@@ -225,7 +208,7 @@ def run_tracker():
     if final_msg:
         send_telegram(final_msg)
     else:
-        print("7+ REG հաղթանակների շարքով թիմեր չեն գտնվել:")
+        print("7+ REG շարքով թիմեր չեն գտնվել:")
 
     with open(STATE_FILE, "w", encoding="utf-8") as f:
         json.dump(current_hot, f)
