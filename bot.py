@@ -229,4 +229,5 @@ def run_tracker():
         json.dump(current_hot, f)
 
 if __name__ == "__main__":
+    send_telegram("🧪 Փորձնական հաղորդագրություն Render-ից՝ բոտի աշխատանքը ստուգելու համար։")
     run_tracker()
