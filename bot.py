@@ -1,6 +1,6 @@
-$botContent = @'
 import os
 import json
+import time
 import requests
 from datetime import datetime, timezone
 
@@ -18,7 +18,7 @@ NHL_TEAM_MAP = {
     "LAK": "Los Angeles Kings", "MIN": "Minnesota Wild", "MTL": "Montreal Canadiens", "NSH": "Nashville Predators",
     "NJD": "New Jersey Devils", "NYI": "New York Islanders", "NYR": "New York Rangers", "OTT": "Ottawa Senators",
     "PHI": "Philadelphia Flyers", "PIT": "Pittsburgh Penguins", "SJS": "San Jose Sharks", "SEA": "Seattle Kraken",
-    "STL": "St Louis Blues", "TBL": "Tampa Bay Lightning", "TOR": "Toronto Maple Leafs", "UTA": "Utah Hockey Club",
+    "STL": "St Louis Blues", "TBL": "Tampa Bay Lightning", "TOR": "Toronto Maple Leafs", "UTA": "Utah Mammoth",
     "VAN": "Vancouver Canucks", "VGK": "Vegas Golden Knights", "WSH": "Washington Capitals", "WPG": "Winnipeg Jets"
 }
 
@@ -34,10 +34,30 @@ def get_fibonacci_bet(streak, base_amount=100):
 def send_telegram(msg):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     payload = {"chat_id": TELEGRAM_CHAT_ID, "text": msg, "parse_mode": "HTML"}
-    try:
-        requests.post(url, json=payload, timeout=10)
-    except Exception as e:
-        print(f"Telegram error: {e}")
+    for attempt in range(4):
+        try:
+            r = requests.post(url, json=payload, timeout=15)
+            if r.status_code == 200:
+                print("Telegram: sent OK")
+                return True
+            print(f"Telegram error {r.status_code}: {r.text[:200]}")
+        except Exception as e:
+            print(f"Telegram error (attempt {attempt + 1}): {type(e).__name__}")
+        time.sleep(3 * (attempt + 1))
+    return False
+
+def get_json(url, tries=4):
+    last = None
+    for attempt in range(tries):
+        try:
+            r = requests.get(url, timeout=15)
+            if r.status_code == 200:
+                return r.json()
+            last = f"HTTP {r.status_code}"
+        except Exception as e:
+            last = type(e).__name__
+        time.sleep(2 * (attempt + 1))
+    raise RuntimeError(last)
 
 def run_tracker():
     print("Starting NHL Tracker with precise REG win-streak & chronological sorting...")
@@ -66,7 +86,8 @@ def run_tracker():
     # 1. NHL Analysis
     for abbr, full_name in NHL_TEAM_MAP.items():
         try:
-            res = requests.get(f"https://api-web.nhle.com/v1/club-schedule-season/{abbr}/now", timeout=10).json()
+            res = get_json(f"https://api-web.nhle.com/v1/club-schedule-season/{abbr}/now")
+            time.sleep(0.3)
             games = [g for g in res.get("games", []) if g.get("gameType") == 2]
             if games:
                 nhl_schedules[abbr] = games
@@ -233,6 +254,3 @@ def run_tracker():
 
 if __name__ == "__main__":
     run_tracker()
-'@
-Set-Content -Path "bot.py" -Value $botContent -Encoding UTF8
-Write-Host "bot.py-ն հաջողությամբ ուղղվեց և պահպանվեց!" -ForegroundColor Green
