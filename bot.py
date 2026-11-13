@@ -1,3 +1,4 @@
+$botContent = @'
 import os
 import json
 import requests
@@ -39,7 +40,7 @@ def send_telegram(msg):
         print(f"Telegram error: {e}")
 
 def run_tracker():
-    print("Starting NHL Tracker with chronological sorting...")
+    print("Starting NHL Tracker with precise REG win-streak & chronological sorting...")
     
     prev_teams = []
     if os.path.exists(STATE_FILE):
@@ -73,18 +74,31 @@ def run_tracker():
                 if completed:
                     completed.sort(key=lambda x: x["gameDate"], reverse=True)
                     last_g = completed[0]
+                    
+                    is_home_last = (last_g['homeTeam']['abbrev'] == abbr)
+                    l_t_score = last_g['homeTeam']['score'] if is_home_last else last_g['awayTeam']['score']
+                    l_o_score = last_g['awayTeam']['score'] if is_home_last else last_g['homeTeam']['score']
+
                     nhl_last_outcomes[abbr] = {
                         "period": last_g.get("gameOutcome", {}).get("lastPeriodType"),
-                        "score": f"{last_g['awayTeam']['abbrev']} {last_g['awayTeam']['score']} - {last_g['homeTeam']['score']} {last_g['homeTeam']['abbrev']}"
+                        "score": f"{last_g['awayTeam']['abbrev']} {last_g['awayTeam']['score']} - {last_g['homeTeam']['score']} {last_g['homeTeam']['abbrev']}",
+                        "won": l_t_score > l_o_score
                     }
                     
-                    # Calculate consecutive REG games (not reaching OT/SO)
+                    # Calculate consecutive REG WINS (must win AND not go to OT/SO)
                     cnt = 0
                     for g in completed:
+                        h_score = g['homeTeam']['score']
+                        a_score = g['awayTeam']['score']
+                        is_home = (g['homeTeam']['abbrev'] == abbr)
+                        t_score = h_score if is_home else a_score
+                        o_score = a_score if is_home else h_score
                         pt = g.get("gameOutcome", {}).get("lastPeriodType")
-                        if pt in ["OT", "SO"]:
+                        
+                        if t_score > o_score and pt not in ["OT", "SO"]:
+                            cnt += 1
+                        else:
                             break
-                        cnt += 1
                     nhl_streaks[abbr] = cnt
         except Exception as e:
             print(f"NHL error for {abbr}: {e}")
@@ -95,8 +109,12 @@ def run_tracker():
         if prev_item.startswith("NHL:"):
             p_team = prev_item.split(":")[1]
             if p_team in nhl_streaks and nhl_streaks[p_team] < MIN_STREAK:
+                last_info = nhl_last_outcomes.get(p_team, {})
+                reason = "խաղաց ոչ-ոքի (OT/SO)" if last_info.get("period") in ["OT", "SO"] else "պարտվեց հիմնական ժամանակում"
                 reset_message += f"⚠️ <b>ՇԱՐՔԸ ԸՆԴՀԱՏՎԵՑ</b>\n"
-                reset_message += f"• <b>NHL: {p_team}</b> — Անընդմեջ REG շարքը նվազել է (< 7)\n  ❌ Թիմը դուրս եկավ ցուցակից:\n\n"
+                reset_message += f"• <b>NHL: {p_team}</b> — Վերջին խաղում {reason}\n"
+                reset_message += f"  ▫️ Հաշիվը՝ <i>{last_info.get('score', '')}</i>\n"
+                reset_message += f"  ❌ Թիմը դուրս եկավ ցուցակից և այլևս չի հաշվարկվելու:\n\n"
 
     for abbr, streak in nhl_streaks.items():
         if streak >= MIN_STREAK:
@@ -194,7 +212,7 @@ def run_tracker():
         final_msg += reset_message
 
     if nhl_results:
-        final_msg += "🏒 <b>NHL HOT REG STREAKS (7+ Games)</b>\n\n"
+        final_msg += "🏒 <b>NHL HOT REG WINS (7+ Games)</b>\n\n"
         for item in nhl_results:
             final_msg += f"• <b>{item['team']}</b> — <code>{item['streak']} խաղ</code> անընդմեջ (REG)\n"
             final_msg += f"  📊 <b>Ֆիբոնաչի Քայլ {item['step']}:</b> <code>{item['units']} unit</code> (<b>{item['total']} ֏</b>)\n"
@@ -208,10 +226,13 @@ def run_tracker():
     if final_msg:
         send_telegram(final_msg)
     else:
-        print("7+ REG շարքով թիմեր չեն գտնվել:")
+        print("7+ REG հաղթանակների շարքով թիմեր չեն գտնվել:")
 
     with open(STATE_FILE, "w", encoding="utf-8") as f:
         json.dump(current_hot, f)
 
 if __name__ == "__main__":
     run_tracker()
+'@
+Set-Content -Path "bot.py" -Value $botContent -Encoding UTF8
+Write-Host "bot.py-ն հաջողությամբ ուղղվեց և պահպանվեց!" -ForegroundColor Green
